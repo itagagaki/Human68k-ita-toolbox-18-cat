@@ -6,6 +6,8 @@
 * 1.2
 * Itagaki Fumihiko 07-Feb-93  ファイル引数に過剰な / があれば除去する
 * 1.3
+* Itagaki Fumihiko 19-Feb-93  標準入力が切り替えられていても端末から^Cや^Sなどが効くようにした
+* 1.4
 *
 * Usage: cat [ -nbsvetmqBCZ ] [ <ファイル> | - ] ...
 *
@@ -59,6 +61,8 @@ start1:
 		move.l	a0,-(a7)
 		DOS	_SETBLOCK
 		addq.l	#8,a7
+	*
+		move.l	#-1,stdin(a6)
 	*
 	*  引数並び格納エリアを確保する
 	*
@@ -246,6 +250,19 @@ outbuf_ok:
 inpbuf_ok:
 		move.l	d0,inpbuf_top(a6)
 	*
+	*  標準入力を切り替える
+	*
+		clr.w	-(a7)				*  標準入力を
+		DOS	_DUP				*  複製したハンドルから入力し，
+		addq.l	#2,a7
+		move.l	d0,stdin(a6)
+		bmi	start_do_files
+
+		clr.w	-(a7)
+		DOS	_CLOSE				*  標準入力はクローズする．
+		addq.l	#2,a7				*  こうしないと ^C や ^S が効かない
+start_do_files:
+	*
 	*  開始
 	*
 		clr.l	lineno(a6)
@@ -253,88 +270,90 @@ inpbuf_ok:
 		sf	pending_cr(a6)
 		sf	last_is_empty(a6)
 		tst.l	d7
-		bne	for_file_loop
-
-		bsr	do_stdin
-		bra	for_file_done
-
+		beq	do_stdin
 for_file_loop:
+		subq.l	#1,d7
 		movea.l	a0,a1
 		bsr	strfor1
 		exg	a0,a1
 		cmpi.b	#'-',(a0)
-		bne	open_file
+		bne	do_file
 
 		tst.b	1(a0)
-		bne	open_file
+		bne	do_file
+do_stdin:
+		lea	msg_stdin(pc),a0
+		move.l	stdin(a6),d2
+		bmi	open_file_failure
 
-		bsr	do_stdin
+		bsr	cat_one
 		bra	for_file_continue
 
-open_file:
+do_file:
 		bsr	strip_excessive_slashes
 		clr.w	-(a7)
 		move.l	a0,-(a7)
 		DOS	_OPEN
 		addq.l	#6,a7
-		tst.l	d0
-		bpl	open_file_ok
+		move.l	d0,d2
+		bmi	open_file_failure
 
-		moveq	#2,d6
-		btst	#FLAG_q,d5
-		bne	for_file_continue
-
-		bsr	werror_myname_and_msg
-		move.l	a0,-(a7)
-		lea	msg_open_fail(pc),a0
-		bsr	werror
-		movea.l	(a7)+,a0
-		bra	for_file_continue
-
-open_file_ok:
-		move.w	d0,d2
-		bsr	do_file
+		bsr	cat_one
 		move.w	d2,-(a7)
 		DOS	_CLOSE
 		addq.l	#2,a7
 for_file_continue:
 		movea.l	a1,a0
-		subq.l	#1,d7
+		tst.l	d7
 		bne	for_file_loop
-for_file_done:
+
 		bsr	flush_outbuf
 exit_program:
+		move.l	stdin(a6),d0
+		bmi	exit_program_1
+
+		clr.w	-(a7)				*  標準入力を
+		move.w	d0,-(a7)			*  元に
+		DOS	_DUP2				*  戻す．
+		DOS	_CLOSE				*  複製はクローズする．
+exit_program_1:
 		move.w	d6,-(a7)
 		DOS	_EXIT2
 
+open_file_failure:
+		moveq	#2,d6
+		btst	#FLAG_q,d5
+		bne	for_file_continue
+
+		bsr	werror_myname_and_msg
+		lea	msg_open_fail(pc),a0
+		bsr	werror
+		bra	for_file_continue
+****************************************************************
 cat_fish:
 		pea	msg_catfish(pc)
 		DOS	_PRINT
 		addq.l	#4,a7
 		bra	exit_program
 ****************************************************************
-* do_stdin
-* do_file
+* cat_one
 ****************************************************************
-do_stdin:
-		moveq	#0,d2
-		lea	msg_stdin(pc),a0
-do_file:
+cat_one:
 		btst	#FLAG_Z,d5
 		sne	terminate_by_ctrlz(a6)
 		sf	terminate_by_ctrld(a6)
 		move.w	d2,d0
 		bsr	is_chrdev
-		beq	do_file_start			*  -- ブロック・デバイス
+		beq	cat_one_start			*  -- ブロック・デバイス
 
 		btst	#5,d0				*  '0':cooked  '1':raw
-		bne	do_file_start
+		bne	cat_one_start
 
 		st	terminate_by_ctrlz(a6)
 		st	terminate_by_ctrld(a6)
-do_file_start:
+cat_one_start:
 		movea.l	inpbuf_top(a6),a3
-do_file_loop:
+cat_one_loop:
 		move.l	inpbuf_size(a6),-(a7)
 		move.l	a3,-(a7)
 		move.w	d2,-(a7)
@@ -357,10 +376,10 @@ trunc_ctrlz_done:
 		bsr	trunc
 trunc_ctrld_done:
 		tst.l	d3
-		beq	do_file_done
+		beq	cat_one_done
 
 		btst	#FLAG_process,d5
-		bne	do_file_process
+		bne	cat_one_do_process
 
 		move.l	d3,-(a7)
 		move.l	a3,-(a7)
@@ -373,9 +392,9 @@ trunc_ctrld_done:
 		cmp.l	d3,d0
 		blo	write_fail
 
-		bra	do_file_continue
+		bra	cat_one_continue
 
-do_file_process:
+cat_one_do_process:
 		movea.l	a3,a2
 write_loop:
 		move.b	(a2)+,d0
@@ -543,10 +562,10 @@ put1char_normal:
 write_continue:
 		subq.l	#1,d3
 		bne	write_loop
-do_file_continue:
+cat_one_continue:
 		tst.b	d4
-		beq	do_file_loop
-do_file_done:
+		beq	cat_one_loop
+cat_one_done:
 flush_cr:
 		tst.b	pending_cr(a6)
 		beq	flush_cr_done
@@ -703,7 +722,7 @@ malloc:
 .data
 
 	dc.b	0
-	dc.b	'## cat 1.3 ##  Copyright(C)1991-93 by Itagaki Fumihiko',0
+	dc.b	'## cat 1.4 ##  Copyright(C)1991-93 by Itagaki Fumihiko',0
 
 msg_myname:		dc.b	'cat: ',0
 word_fish:		dc.b	'-fish',0
@@ -729,6 +748,7 @@ bsstop:
 inpbuf_top:		ds.l	1
 inpbuf_size:		ds.l	1
 lineno:			ds.l	1
+stdin:			ds.l	1
 terminate_by_ctrlz:	ds.b	1
 terminate_by_ctrld:	ds.b	1
 newline:		ds.b	1
