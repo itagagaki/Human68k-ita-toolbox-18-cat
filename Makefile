@@ -1,17 +1,17 @@
-# Makefile for ITA TOOLBOX #? cat
+# Makefile for ITA TOOLBOX #18 cat
 
-AS	= \usr\pds\HAS.X -i $(INCLUDE)
-LK	= \usr\pds\hlk.x -x
-CV      = -\bin\CV.X -r
-INSTALL = cp -puv
-BACKUP  = cp -auv
+AS	= HAS.X -i $(INCLUDE)
+LK	= hlk.x -x
+CV      = -CV.X -r
 CP      = cp
 RM      = -rm -f
 
 INCLUDE = $(HOME)/fish/include
 
-DESTDIR   = A:\usr\ita
+DESTDIR   = A:/usr/ita
 BACKUPDIR = B:/cat/1.2
+RELEASE_ARCHIVE = CAT12
+RELEASE_FILES = MANIFEST README ../NOTICE ../DIRECTORY ../HUPAIR CHANGES cat.1 cat.x
 
 EXTLIB = $(HOME)/fish/lib/ita.l
 
@@ -21,7 +21,7 @@ PROGRAM = cat.x
 
 ###
 
-.PHONY: all clean clobber install backup
+.PHONY: all clean clobber install release backup
 
 .TERMINAL: *.h *.s
 
@@ -42,13 +42,6 @@ clobber:: clean
 
 $(PROGRAM) : $(INCLUDE)/doscall.h $(INCLUDE)/chrcode.h $(EXTLIB)
 
-install::
-	$(INSTALL) $(PROGRAM) $(DESTDIR)
-
-backup::
-	fish -fc '$(BACKUP) * $(BACKUPDIR)'
-
-clean::
-	$(RM) $(PROGRAM)
+include ../Makefile.sub
 
 ###

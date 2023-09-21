@@ -1,44 +1,45 @@
 * cat - concatinate
 *
 * Itagaki Fumihiko 19-Jun-91  Create.
+* 1.0
+* Itagaki Fumihiko 27-Jan-93  Zap.
+* 1.2
 *
-* Usage: cat [ -CFZunbsvetmq ] [ - | <ファイル> ] ...
+* Usage: cat [ -nbsvetmqBCZ ] [ <ファイル> | - ] ...
 *
 
 .include doscall.h
 .include chrcode.h
 
 .xref DecodeHUPAIR
+.xref issjis
 .xref iscntrl
 .xref utoa
 .xref strlen
+.xref strcmp
 .xref strfor1
 .xref printfi
-.xref tfopen
-.xref fclose
 
-STACKSIZE	equ	512
+STACKSIZE	equ	2048
 
 INPBUF_SIZE_MAX_TO_OUTPUT_TO_COOKED	equ	8192
-OUTBUF_SIZE	equ	1024
+OUTBUF_SIZE	equ	8192
 
 CTRLD	equ	$04
 CTRLZ	equ	$1A
 
-FLAG_complex	equ	0
-FLAG_C		equ	1	*  -c
-FLAG_F		equ	2	*  -f
-FLAG_Z		equ	3	*  -z
-FLAG_u		equ	4	*  -u （出力がキャラクタ・デバイスのときは常にON）
-FLAG_n		equ	5	*  -n
-FLAG_b		equ	6	*  -b
-FLAG_s		equ	7	*  -s
-FLAG_v		equ	8	*  -v
-FLAG_e		equ	9	*  -e
-FLAG_t		equ	10	*  -t
-FLAG_m		equ	11	*  -m
-FLAG_q		equ	12	*  -q
-
+FLAG_process	equ	0
+FLAG_n		equ	1	*  -n
+FLAG_b		equ	2	*  -b
+FLAG_s		equ	3	*  -s
+FLAG_v		equ	4	*  -v
+FLAG_e		equ	5	*  -e
+FLAG_t		equ	6	*  -t
+FLAG_m		equ	7	*  -m
+FLAG_q		equ	8	*  -q
+FLAG_B		equ	9	*  -B
+FLAG_C		equ	10	*  -C
+FLAG_Z		equ	11	*  -Z
 
 .text
 
@@ -48,8 +49,7 @@ start:
 start1:
 		lea	bsstop(pc),a6			*  A6 := BSSの先頭アドレス
 		lea	stack_bottom(a6),a7		*  A7 := スタックの底
-		DOS	_GETPDB
-		movea.l	d0,a0				*  A0 : PDBアドレス
+		lea	$10(a0),a0			*  A0 : PDBアドレス
 		move.l	a7,d0
 		sub.l	a0,d0
 		move.l	d0,-(a7)
@@ -66,132 +66,163 @@ start1:
 		bmi	insufficient_memory
 
 		movea.l	d0,a1				*  A1 := 引数並び格納エリアの先頭アドレス
-		bsr	DecodeHUPAIR			*  デコードする
+	*
+	*  引数をデコードし，解釈する
+	*
+		moveq	#0,d6				*  D6.W : エラー・コード
+		bsr	DecodeHUPAIR			*  引数をデコードする
 		movea.l	a1,a0				*  A0 : 引数ポインタ
 		move.l	d0,d7				*  D7.L : 引数カウンタ
-		moveq	#0,d6				*  D6.W : エラー・コード
+		subq.l	#1,d0
+		bne	decode_opt_start
+
+		lea	word_fish(pc),a1
+		bsr	strcmp
+		beq	cat_fish
+decode_opt_start:
 		moveq	#0,d5				*  D5.L : フラグbits
-parse_option:
+decode_opt_loop1:
 		tst.l	d7
-		beq	parse_option_done
+		beq	decode_opt_done
 
 		cmpi.b	#'-',(a0)
-		bne	parse_option_done
+		bne	decode_opt_done
 
 		tst.b	1(a0)
-		beq	parse_option_done
+		beq	decode_opt_done
 
-		addq.l	#1,a0
 		subq.l	#1,d7
-parse_option_arg:
+		addq.l	#1,a0
 		move.b	(a0)+,d0
-		beq	parse_option
+		cmp.b	#'-',d0
+		bne	decode_opt_loop2
 
-		cmp.b	#'C',d0
-		beq	option_c_found
+		tst.b	(a0)+
+		beq	decode_opt_done
 
-		cmp.b	#'F',d0
-		beq	option_f_found
-
-		moveq	#FLAG_Z,d1
-		cmp.b	#'Z',d0
-		beq	option_found_1
-
-		moveq	#FLAG_u,d1
-		cmp.b	#'u',d0
-		beq	option_found_1
-
+		subq.l	#1,a0
+decode_opt_loop2:
 		moveq	#FLAG_n,d1
 		cmp.b	#'n',d0
-		beq	option_found_2
+		beq	set_option_with_process
 
 		moveq	#FLAG_b,d1
 		cmp.b	#'b',d0
-		beq	option_found_2
+		beq	set_option_with_process
 
 		moveq	#FLAG_s,d1
 		cmp.b	#'s',d0
-		beq	option_found_2
+		beq	set_option_with_process
 
 		moveq	#FLAG_v,d1
 		cmp.b	#'v',d0
-		beq	option_found_2
+		beq	set_option_with_process
 
 		moveq	#FLAG_e,d1
 		cmp.b	#'e',d0
-		beq	option_found_2
+		beq	set_option_with_process
 
 		moveq	#FLAG_t,d1
 		cmp.b	#'t',d0
-		beq	option_found_2
+		beq	set_option_with_process
 
 		moveq	#FLAG_m,d1
 		cmp.b	#'m',d0
-		beq	option_found_2
+		beq	set_option_with_process
 
 		moveq	#FLAG_q,d1
 		cmp.b	#'q',d0
-		beq	option_found_1
+		beq	set_option
 
-		move.w	d0,-(a7)
-		bsr	werror_myname
-		lea	msg_illegal_option(pc),a0
-		bsr	werror
-		move.l	#1,-(a7)
-		pea	5(a7)
+		cmp.b	#'B',d0
+		beq	option_B_found
+
+		cmp.b	#'C',d0
+		beq	option_C_found
+
+		moveq	#FLAG_Z,d1
+		cmp.b	#'Z',d0
+		beq	set_option
+
+		moveq	#1,d1
+		tst.b	(a0)
+		beq	bad_option_1
+
+		bsr	issjis
+		bne	bad_option_1
+
+		moveq	#2,d1
+bad_option_1:
+		move.l	d1,-(a7)
+		pea	-1(a0)
 		move.w	#2,-(a7)
+		lea	msg_illegal_option(pc),a0
+		bsr	werror_myname_and_msg
 		DOS	_WRITE
-		lea	12(a7),a7
+		lea	10(a7),a7
 		lea	msg_usage(pc),a0
 		bsr	werror
 		moveq	#1,d6
 		bra	exit_program
 
-option_c_found:
-		bset	#FLAG_C,d5
-		bclr	#FLAG_F,d5
-		bra	parse_option_arg
-
-option_f_found:
-		bset	#FLAG_F,d5
+option_B_found:
+		bset	#FLAG_B,d5
 		bclr	#FLAG_C,d5
-		bra	parse_option_arg
+		bra	set_option_done
 
-option_found_2:
-		bset	#FLAG_complex,d5		*  即時write不可
-option_found_1:
+option_C_found:
+		bset	#FLAG_C,d5
+		bclr	#FLAG_B,d5
+		bra	set_option_done
+
+set_option_with_process:
+		bset	#FLAG_process,d5		*  即時write不可
+set_option:
 		bset	d1,d5
-		bra	parse_option_arg
+set_option_done:
+		move.b	(a0)+,d0
+		bne	decode_opt_loop2
+		bra	decode_opt_loop1
 
-parse_option_done:
+decode_opt_done:
 		moveq	#1,d0				*  出力は
 		bsr	is_chrdev			*  キャラクタ・デバイスか？
-		beq	stdout_is_block_device		*  -- ブロック・デバイスである
-	*
-	*  出力はキャラクタ・デバイス
-	*
-		sf	do_buffering			*  バッファリングしない
-		btst	#5,d0				*  '0':cooked  '1':raw
-		bne	malloc_max_for_input
+		seq	do_buffering
+		beq	input_max			*  -- block device
 
+		*  character device
+		btst	#5,d0				*  '0':cooked  '1':raw
+		bne	input_max
+
+		*  cooked character device
 		move.l	#INPBUF_SIZE_MAX_TO_OUTPUT_TO_COOKED,d0
-		btst	#FLAG_F,d5
-		bne	malloc_inpbuf
+		btst	#FLAG_B,d5
+		bne	inpbufsize_ok
 
 		bset	#FLAG_C,d5			*  改行を変換する
-		bset	#FLAG_complex,d5		*  即時writeできない
-		bra	malloc_inpbuf
+		bra	inpbufsize_ok
 
-stdout_is_block_device:
-	*
-	*  stdoutはブロック・デバイス
-	*
-		bset	#FLAG_complex,d5		*  単純writeしない
-		btst	#FLAG_u,d5
-		seq	do_buffering
-		bne	malloc_max_for_input
+input_max:
+		move.l	#$00ffffff,d0
+inpbufsize_ok:
+		move.l	d0,inpbuf_size(a6)
 
+		*  process を fix する
+		btst	#FLAG_C,d5
+		beq	set_process_ok
+
+		bset	#FLAG_process,d5
+set_process_ok:
+		*  do_buffering を fix する
+		btst	#FLAG_process,d5
+		bne	set_buffering_ok
+
+		sf	do_buffering
+set_buffering_ok:
 		*  出力バッファを確保する
+		tst.b	do_buffering
+		beq	outbuf_ok
+
 		move.l	#OUTBUF_SIZE,d0
 		move.l	d0,outbuf_free
 		bsr	malloc
@@ -199,11 +230,9 @@ stdout_is_block_device:
 
 		move.l	d0,outbuf_top
 		move.l	d0,outbuf_ptr
-malloc_max_for_input:
-		move.l	#$00ffffff,d0
-malloc_inpbuf:
+outbuf_ok:
 		*  入力バッファを確保する
-		move.l	d0,inpbuf_size(a6)
+		move.l	inpbuf_size(a6),d0
 		bsr	malloc
 		bpl	inpbuf_ok
 
@@ -213,6 +242,8 @@ malloc_inpbuf:
 		bmi	insufficient_memory
 inpbuf_ok:
 		move.l	d0,inpbuf_top(a6)
+
+		*  開始
 		clr.l	lineno(a6)
 		st	newline(a6)
 		sf	pending_cr(a6)
@@ -234,16 +265,18 @@ for_file_loop:
 		bra	for_file_continue
 
 open_file:
-		moveq	#0,d0
-		bsr	tfopen
+		clr.w	-(a7)
+		move.l	a0,-(a7)
+		DOS	_OPEN
+		addq.l	#6,a7
+		tst.l	d0
 		bpl	open_file_ok
 
 		moveq	#2,d6
 		btst	#FLAG_q,d5
 		bne	for_file_continue
 
-		bsr	werror_myname
-		bsr	werror
+		bsr	werror_myname_and_msg
 		move.l	a0,-(a7)
 		lea	msg_open_fail(pc),a0
 		bsr	werror
@@ -252,10 +285,10 @@ open_file:
 
 open_file_ok:
 		move.w	d0,d2
-		sf	this_is_stdin(a6)
 		bsr	do_file
-		move.w	d2,d0
-		bsr	fclose
+		move.w	d2,-(a7)
+		DOS	_CLOSE
+		addq.l	#2,a7
 for_file_continue:
 		bsr	strfor1
 		subq.l	#1,d7
@@ -265,13 +298,24 @@ for_file_done:
 exit_program:
 		move.w	d6,-(a7)
 		DOS	_EXIT2
+
+cat_fish:
+		pea	msg_catfish(pc)
+		DOS	_PRINT
+		addq.l	#4,a7
+		bra	exit_program
 ****************************************************************
 * do_stdin
 * do_file
 ****************************************************************
 do_stdin:
+		move.l	a0,-(a7)
 		moveq	#0,d2
-		st	this_is_stdin(a6)
+		lea	msg_stdin(pc),a0
+		bsr	do_file
+		movea.l	(a7)+,a0
+		rts
+
 do_file:
 		btst	#FLAG_Z,d5
 		sne	terminate_by_ctrlz(a6)
@@ -312,8 +356,8 @@ trunc_ctrld_done:
 		tst.l	d3
 		beq	do_file_done
 
-		btst	#FLAG_complex,d5
-		bne	do_file_complex
+		btst	#FLAG_process,d5
+		bne	do_file_process
 
 		move.l	d3,-(a7)
 		move.l	a3,-(a7)
@@ -328,7 +372,7 @@ trunc_ctrld_done:
 
 		bra	do_file_continue
 
-do_file_complex:
+do_file_process:
 		movea.l	a3,a2
 write_loop:
 		move.b	(a2)+,d0
@@ -564,7 +608,7 @@ flush_return:
 putc:
 		movem.l	d0/a0,-(a7)
 		tst.b	do_buffering
-		bne	putc_do_buffering
+		bne	putc_buffering
 
 		move.w	d0,-(a7)
 		move.l	#1,-(a7)
@@ -576,12 +620,12 @@ putc:
 		bne	write_fail
 		bra	putc_done
 
-putc_do_buffering:
+putc_buffering:
 		tst.l	outbuf_free
-		bne	putc_do_buffering_1
+		bne	putc_buffering_1
 
 		bsr	flush_outbuf
-putc_do_buffering_1:
+putc_buffering_1:
 		movea.l	outbuf_ptr,a0
 		move.b	d0,(a0)+
 		move.l	a0,outbuf_ptr
@@ -596,13 +640,7 @@ insufficient_memory:
 		bra	werror_exit_3
 *****************************************************************
 read_fail:
-		bsr	werror_myname
-		tst.b	this_is_stdin(a6)
-		beq	read_fail_1
-
-		lea	msg_stdin(pc),a0
-read_fail_1:
-		bsr	werror
+		bsr	werror_myname_and_msg
 		lea	msg_read_fail(pc),a0
 		bra	werror_exit_3
 *****************************************************************
@@ -620,6 +658,8 @@ werror_myname:
 		movea.l	(a7)+,a0
 		rts
 *****************************************************************
+werror_myname_and_msg:
+		bsr	werror_myname
 werror:
 		movem.l	d0/a1,-(a7)
 		movea.l	a0,a1
@@ -660,19 +700,22 @@ malloc:
 .data
 
 	dc.b	0
-	dc.b	'## cat 1.2 ##  Copyright(C)1991 by Itagaki Fumihiko',0
+	dc.b	'## cat 1.2 ##  Copyright(C)1991-93 by Itagaki Fumihiko',0
 
 msg_myname:		dc.b	'cat: ',0
+word_fish:		dc.b	'-fish',0
 msg_no_memory:		dc.b	'メモリが足りません',CR,LF,0
 msg_open_fail:		dc.b	': オープンできません',CR,LF,0
 msg_read_fail:		dc.b	': 入力エラー',CR,LF,0
 msg_write_fail:		dc.b	'cat: 出力エラー',CR,LF,0
-msg_stdin:		dc.b	'(標準入力)',0
+msg_stdin:		dc.b	'- 標準入力 -',0
 msg_illegal_option:	dc.b	'不正なオプション -- ',0
-msg_usage:		dc.b	CR,LF,'使用法:  cat [ -qcfzunbsvetm ] [ - | <ファイル> ] ...',CR,LF,0
+msg_usage:		dc.b	CR,LF,'使用法:  cat [-nbsvetmqBCZ] [--] [<ファイル>] ...',CR,LF,0
+msg_catfish:		dc.b	'catfish n.【魚】なまず.',CR,LF,0
 *****************************************************************
 .bss
 .even
+* これらはputcで参照されるので abs data でなければならない
 outbuf_top:		ds.l	1
 outbuf_ptr:		ds.l	1
 outbuf_free:		ds.l	1
@@ -683,7 +726,6 @@ bsstop:
 inpbuf_top:		ds.l	1
 inpbuf_size:		ds.l	1
 lineno:			ds.l	1
-this_is_stdin:		ds.b	1
 terminate_by_ctrlz:	ds.b	1
 terminate_by_ctrld:	ds.b	1
 newline:		ds.b	1
