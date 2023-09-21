@@ -8,6 +8,8 @@
 * 1.3
 * Itagaki Fumihiko 19-Feb-93  標準入力が切り替えられていても端末から^Cや^Sなどが効くようにした
 * 1.4
+* Itagaki Fumihiko 03-Jan-94  BSSがきちんと確保されていなかったのを修正
+* 1.5
 *
 * Usage: cat [ -nbsvetmqBCZ ] [ <ファイル> | - ] ...
 *
@@ -27,7 +29,8 @@
 
 STACKSIZE	equ	2048
 
-INPBUF_SIZE_MAX_TO_OUTPUT_TO_COOKED	equ	8192
+READ_MAX_TO_OUTPUT_TO_COOKED	equ	8192
+INPBUFSIZE_MIN	equ	258
 OUTBUF_SIZE	equ	8192
 
 CTRLD	equ	$04
@@ -202,7 +205,7 @@ decode_opt_done:
 		bne	input_max
 
 		*  cooked character device
-		move.l	#INPBUF_SIZE_MAX_TO_OUTPUT_TO_COOKED,d0
+		move.l	#READ_MAX_TO_OUTPUT_TO_COOKED,d0
 		btst	#FLAG_B,d5
 		bne	inpbufsize_ok
 
@@ -244,6 +247,9 @@ outbuf_ok:
 		bpl	inpbuf_ok
 
 		sub.l	#$81000000,d0
+		cmp.l	#INPBUFSIZE_MIN,d0
+		blo	insufficient_memory
+
 		move.l	d0,inpbuf_size(a6)
 		bsr	malloc
 		bmi	insufficient_memory
@@ -722,7 +728,7 @@ malloc:
 .data
 
 	dc.b	0
-	dc.b	'## cat 1.4 ##  Copyright(C)1991-93 by Itagaki Fumihiko',0
+	dc.b	'## cat 1.5 ##  Copyright(C)1991-94 by Itagaki Fumihiko',0
 
 msg_myname:		dc.b	'cat: ',0
 word_fish:		dc.b	'-fish',0
@@ -742,8 +748,7 @@ outbuf_top:		ds.l	1
 outbuf_ptr:		ds.l	1
 outbuf_free:		ds.l	1
 do_buffering:		ds.b	1
-.even
-bsstop:
+
 .offset 0
 inpbuf_top:		ds.l	1
 inpbuf_size:		ds.l	1
@@ -754,10 +759,15 @@ terminate_by_ctrld:	ds.b	1
 newline:		ds.b	1
 pending_cr:		ds.b	1
 last_is_empty:		ds.b	1
-
-		ds.b	STACKSIZE
+.even
+			ds.b	STACKSIZE
 .even
 stack_bottom:
+
+.bss
+.even
+bsstop:
+		ds.b	stack_bottom
 *****************************************************************
 
 .end start
