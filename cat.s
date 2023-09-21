@@ -4,6 +4,8 @@
 * 1.0
 * Itagaki Fumihiko 27-Jan-93  Zap.
 * 1.2
+* Itagaki Fumihiko 07-Feb-93  ファイル引数に過剰な / があれば除去する
+* 1.3
 *
 * Usage: cat [ -nbsvetmqBCZ ] [ <ファイル> | - ] ...
 *
@@ -19,6 +21,7 @@
 .xref strcmp
 .xref strfor1
 .xref printfi
+.xref strip_excessive_slashes
 
 STACKSIZE	equ	2048
 
@@ -242,8 +245,9 @@ outbuf_ok:
 		bmi	insufficient_memory
 inpbuf_ok:
 		move.l	d0,inpbuf_top(a6)
-
-		*  開始
+	*
+	*  開始
+	*
 		clr.l	lineno(a6)
 		st	newline(a6)
 		sf	pending_cr(a6)
@@ -255,6 +259,9 @@ inpbuf_ok:
 		bra	for_file_done
 
 for_file_loop:
+		movea.l	a0,a1
+		bsr	strfor1
+		exg	a0,a1
 		cmpi.b	#'-',(a0)
 		bne	open_file
 
@@ -265,6 +272,7 @@ for_file_loop:
 		bra	for_file_continue
 
 open_file:
+		bsr	strip_excessive_slashes
 		clr.w	-(a7)
 		move.l	a0,-(a7)
 		DOS	_OPEN
@@ -290,7 +298,7 @@ open_file_ok:
 		DOS	_CLOSE
 		addq.l	#2,a7
 for_file_continue:
-		bsr	strfor1
+		movea.l	a1,a0
 		subq.l	#1,d7
 		bne	for_file_loop
 for_file_done:
@@ -309,13 +317,8 @@ cat_fish:
 * do_file
 ****************************************************************
 do_stdin:
-		move.l	a0,-(a7)
 		moveq	#0,d2
 		lea	msg_stdin(pc),a0
-		bsr	do_file
-		movea.l	(a7)+,a0
-		rts
-
 do_file:
 		btst	#FLAG_Z,d5
 		sne	terminate_by_ctrlz(a6)
@@ -368,7 +371,7 @@ trunc_ctrld_done:
 		bmi	write_fail
 
 		cmp.l	d3,d0
-		blt	write_fail
+		blo	write_fail
 
 		bra	do_file_continue
 
@@ -595,7 +598,7 @@ flush_outbuf:
 		bmi	write_fail
 
 		cmp.l	-4(a7),d0
-		blt	write_fail
+		blo	write_fail
 
 		move.l	outbuf_top,d0
 		move.l	d0,outbuf_ptr
@@ -700,7 +703,7 @@ malloc:
 .data
 
 	dc.b	0
-	dc.b	'## cat 1.2 ##  Copyright(C)1991-93 by Itagaki Fumihiko',0
+	dc.b	'## cat 1.3 ##  Copyright(C)1991-93 by Itagaki Fumihiko',0
 
 msg_myname:		dc.b	'cat: ',0
 word_fish:		dc.b	'-fish',0
